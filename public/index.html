@@ -1,149 +1,88 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>דו"ח זכויות – תל אביב רובע 3/4 (Live)</title>
+  <meta charset="utf-8"/>
+  <title>דו"ח זכויות – תל אביב</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.7.0/dist/geosearch.css">
   <style>
-    body{font-family:Heebo,Arial,sans-serif;margin:0;background:#fff;color:#2c3e50}
-    .wrap{max-width:1040px;margin:0 auto;padding:16px}
-    h1{color:#1a73e8}
-    .header{background:linear-gradient(135deg,#4285f4 0%,#1a73e8 100%);color:#fff;padding:20px 16px}
-    .toolbar{display:flex;gap:10px;align-items:center;margin-top:10px}
-    .card{border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;margin:14px 0}
-    .card .title{background:#e8f0fe;color:#1a73e8;font-weight:700;padding:10px 14px;border-bottom:1px solid #dbe5ff}
-    .card .body{padding:12px 14px}
-    .mapbox{height:420px;border:1px solid #e0e0e0;border-radius:10px}
-    button.primary{padding:8px 12px;border:1px solid #1a73e8;background:#1a73e8;color:#fff;border-radius:8px;cursor:pointer}
-    button.link{padding:6px 10px;border:1px solid #d0d7de;background:#fff;color:#1a73e8;border-radius:8px;cursor:pointer}
-    table{width:100%;border-collapse:collapse}
-    th,td{text-align:right;padding:8px;border-bottom:1px solid #eee}
-    th{background:#f6f9ff;color:#1a73e8}
+    body { font-family: Arial, sans-serif; margin:0; }
+    .header { background:#1a73e8; color:#fff; padding:10px; }
+    .toolbar { margin:10px; display:flex; gap:8px; }
+    .map { height:400px; margin:10px; }
+    table { width:100%; border-collapse:collapse; margin:10px; }
+    th,td { border:1px solid #ddd; padding:6px; text-align:right; }
+    th { background:#f0f4ff; color:#1a73e8; }
   </style>
 </head>
 <body>
   <div class="header">
-    <div class="wrap">
-      <h1>דו"ח זכויות – תל אביב רובע 3/4 (מחובר ל-Render)</h1>
-      <div class="toolbar">
-        <label>רובע:
-          <select id="quarter">
-            <option value="3">3</option>
-            <option value="4" selected>4</option>
-          </select>
-        </label>
-        <input id="address" type="text" placeholder="כתובת או גוש/חלקה (למשל 6215/56)" style="flex:1">
-        <button id="btnFetch" class="primary">משוך נתונים</button>
-        <button id="btnDiscover" class="link">אתר שכבות אוטומטית</button>
-      </div>
-    </div>
+    <h2>דו"ח זכויות – תל אביב (ArcGIS)</h2>
   </div>
-
-  <div class="wrap">
-    <div class="card">
-      <div class="title">מפה</div>
-      <div id="map" class="mapbox"></div>
-    </div>
-
-    <div class="card">
-      <div class="title">תכניות חלות / שכבות</div>
-      <div class="body">
-        <table>
-          <thead>
-            <tr>
-              <th>מס'</th><th>שם</th><th>סטטוס</th><th>אחוזים</th>
-              <th>קומות</th><th>תכסית</th><th>צפיפות</th><th>הערות/קבצים</th>
-            </tr>
-          </thead>
-          <tbody id="plans-body"><tr><td colspan="8">—</td></tr></tbody>
-        </table>
-      </div>
-    </div>
+  <div class="toolbar">
+    <input id="address" placeholder="6215/56" style="flex:1"/>
+    <button id="btnFetch">משוך נתונים</button>
   </div>
+  <div id="map" class="map"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>שכבה</th>
+        <th>נתונים</th>
+      </tr>
+    </thead>
+    <tbody id="results"><tr><td colspan="2">—</td></tr></tbody>
+  </table>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-  <script src="https://unpkg.com/leaflet-geosearch@3.7.0/dist/bundle.min.js"></script>
   <script>
-    const PROXY_BASE = location.origin; // Render serves HTML & API on same domain
+    const PROXY = location.origin; // Render proxy
+    const LAYER_IDS = [954,766,764,423,762,761,760,763,633,950,525,524,682,514];
+    const LAYER_URL = id => `https://gisn.tel-aviv.gov.il/arcgis/rest/services/IView2/MapServer/${id}`;
 
-    const api = {
-      addrToLot: (t) => fetch(PROXY_BASE + '/api/govmap/addressToLotParcel?text=' + encodeURIComponent(t)),
-      lotGeom:    (g,h) => fetch(PROXY_BASE + '/api/govmap/lotParcelGeometry?gush='+encodeURIComponent(g)+'&helka='+encodeURIComponent(h)),
-      intersect:  (wkt,layer) => fetch(PROXY_BASE + '/api/govmap/intersect', {
-                      method:'POST', headers:{'Content-Type':'application/json'},
-                      body:JSON.stringify({wkt, layerName:layer})
-                    }),
-      iviewLayers:() => fetch(PROXY_BASE + '/api/arcgis/iview2/layers'),
-      arcQuery:   (url,geom) => fetch(PROXY_BASE + '/api/arcgis/query', {
-                      method:'POST', headers:{'Content-Type':'application/json'},
-                      body:JSON.stringify({layerUrl:url, geometry:geom, outFields:'*'})
-                    })
-    };
-
-    const map = L.map('map', { center: [32.0809,34.7806], zoom: 16 });
+    const map = L.map('map').setView([32.08,34.78],15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    const drawn = new L.FeatureGroup(); map.addLayer(drawn);
+    const drawn = new L.FeatureGroup().addTo(map);
 
-    function renderPlans(rows){
-      const tb = document.getElementById('plans-body');
-      if (!rows.length){ tb.innerHTML = '<tr><td colspan="8">לא נמצאו פריטים</td></tr>'; return; }
-      tb.innerHTML = rows.map(r => `<tr>
-        <td>${r.id||'—'}</td><td>${r.name||'—'}</td><td>${r.status||'—'}</td>
-        <td>${r.percent||'—'}</td><td>${r.floors||'—'}</td><td>${r.coverage||'—'}</td>
-        <td>${r.density||'—'}</td><td>${r.note||''} ${r.pdf?('<a target="_blank" href="'+r.pdf+'">PDF</a>'):''}</td>
-      </tr>`).join('');
+    async function fetchGeom(gush,helka){
+      const url = `${PROXY}/api/govmap/lotParcelGeometry?gush=${gush}&helka=${helka}`;
+      const r = await fetch(url); return await r.json();
     }
 
-    function normGM(r){return{ id:r.id||r.planId, name:r.name||r.planName, status:r.status, percent:r.percent, floors:r.floors, coverage:r.coverage, density:r.density, pdf:r.pdf, note:r.note||''};}
-    function normESRI(f,label){const a=f.attributes||{};return{ id:a.ID||a.OBJECTID||a.PLAN_ID, name:a.NAME||a.PLAN_NAME||label, status:a.STATUS, percent:a.PERCENT||a.FAR, floors:a.FLOORS, coverage:a.COVERAGE, density:a.DENSITY, pdf:a.PDF_URL||a.LINK, note:label||''};}
-
-    async function discover(){
-      const res = await api.iviewLayers(); if(!res.ok){ alert('שגיאה באיתור שכבות'); return; }
-      const js = await res.json();
-      const layers = (js.layers||[]).map(l=>({id:l.id,name:String(l.name||''),url:`https://gisn.tel-aviv.gov.il/arcgis/rest/services/IView2/MapServer/${l.id}`}));
-      // נסה לנחש שכבות:
-      window.ARCGIS_LOCAL = {
-        localPlans:  (layers.find(l=>l.name.includes('תוכנית'))||{}).url || '',
-        setbacks:    (layers.find(l=>l.name.includes('קווי'))||{}).url || '',
-        conservation:(layers.find(l=>l.name.includes('שימור'))||{}).url || '',
-        buildings:   (layers.find(l=>l.name.includes('בניין'))||{}).url || ''
-      };
-      alert('נמצאו שכבות:\n'+JSON.stringify(window.ARCGIS_LOCAL,null,2));
+    async function queryLayer(layerId, geometry){
+      const r = await fetch(`${PROXY}/api/arcgis/query`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({layerUrl:LAYER_URL(layerId), geometry, outFields:'*'})
+      });
+      return await r.json();
     }
 
     async function fetchAll(){
       try{
         const v = document.getElementById('address').value.trim();
-        let gush,helka;
-        if (/^\d+\s*\/\s*\d+$/.test(v)){ [gush,helka]=v.split('/').map(s=>s.trim()); }
-        else { const r=await api.addrToLot(v); const j=await r.json(); gush=String(j.gush||j.GUSH||''); helka=String(j.helka||j.HELKA||''); }
-        if(!gush||!helka){ alert('לא נמצאו גוש/חלקה'); return; }
+        if(!/^\d+\/\d+$/.test(v)){ alert("הכנס גוש/חלקה"); return; }
+        const [gush,helka] = v.split('/');
 
-        const gmr = await api.lotGeom(gush,helka); const gm = await gmr.json();
-        const wkt = gm.wkt||gm.WKT; const gj = gm.geojson||gm.GEOJSON;
-        if(gj){ drawn.clearLayers(); const layer=L.geoJSON(gj,{color:'#1a73e8'}).addTo(map); map.fitBounds(layer.getBounds()); }
+        // קבל גיאומטריה
+        const gm = await fetchGeom(gush,helka);
+        const gj = gm.geojson || gm.GEOJSON;
+        drawn.clearLayers();
+        if(gj){ const lyr=L.geoJSON(gj,{color:'red'}).addTo(drawn); map.fitBounds(lyr.getBounds()); }
 
-        const rows=[];
-        for (const layer of ['plans_master','urban_renewal','conservation_state']){
-          const res = await api.intersect(wkt,layer); const js=await res.json();
-          rows.push(...(js.records||js.features||[]).map(normGM));
+        // טבלת תוצאות
+        const tb=document.getElementById('results'); tb.innerHTML="";
+        for(const id of LAYER_IDS){
+          const data = await queryLayer(id, gj);
+          const feats = data.features||[];
+          tb.innerHTML += `<tr>
+            <td>${id}</td>
+            <td>${feats.length? JSON.stringify(feats[0].attributes).substring(0,120)+"..." : "אין נתונים"}</td>
+          </tr>`;
         }
-        const arc = window.ARCGIS_LOCAL||{};
-        for (const entry of [ ['localPlans','תכנית מקומית'], ['setbacks','קווי בניין'], ['conservation','שימור'], ['buildings','בנוי קיים'] ]){
-          const url = arc[entry[0]]; if(!url) continue;
-          const r = await api.arcQuery(url, gj); const j = await r.json();
-          rows.push(...(j.features||[]).map(f=>normESRI(f,entry[1])));
-        }
-        renderPlans(rows);
-      }catch(e){ console.error(e); alert('שגיאה בשליפה. בדוק Environment Variables ושהשירות חי.'); }
+      }catch(e){console.error(e); alert("שגיאה בשליפה");}
     }
 
     document.getElementById('btnFetch').onclick = fetchAll;
-    document.getElementById('btnDiscover').onclick = discover;
   </script>
 </body>
 </html>
