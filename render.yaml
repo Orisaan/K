@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: karkaa-proxy
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    envVars:
+      - key: GOVMAP_BASE
+        value: https://api.govmap.gov.il
+      - key: ALLOWED_ARCGIS_HOSTS
+        value: gisn.tel-aviv.gov.il
